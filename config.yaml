@@ -1,0 +1,9 @@
+path: C:\Users\GökhanEgeKoçal\Desktop\dat
+train: C:\Users\GökhanEgeKoçal\Desktop\dat\train\images
+val: C:\Users\GökhanEgeKoçal\Desktop\dat\train\images
+
+names:
+    0: apple
+    1: apple
+
+    
