@@ -13,112 +13,6 @@ from pathlib import Path
 # IMAGE-PROCESSING FUNCTIONS (From Your Second Code)
 ################################################################################
 
-def color_curvature_segmentation(image):
-    """
-    Fallback segmentation approach if YOLO fails.
-    Returns a binary mask of the apple in the image.
-    """
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
-    # Define color ranges for different apple colors
-    lower_red1 = np.array([0, 40, 40])
-    upper_red1 = np.array([20, 255, 255])
-    lower_red2 = np.array([160, 40, 40])
-    upper_red2 = np.array([180, 255, 255])
-
-    lower_green = np.array([35, 40, 40])
-    upper_green = np.array([85, 255, 255])
-    lower_yellow = np.array([20, 40, 40])
-    upper_yellow = np.array([35, 255, 255])
-
-    mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    mask_green = cv2.inRange(hsv, lower_green, upper_green)
-    mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
-    color_mask = cv2.bitwise_or(
-        cv2.bitwise_or(mask_red1, mask_red2),
-        cv2.bitwise_or(mask_green, mask_yellow)
-    )
-
-    kernel = np.ones((7, 7), np.uint8)
-    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel)
-    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel)
-    color_mask = cv2.dilate(color_mask, kernel, iterations=1)
-
-    contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    final_mask = np.zeros_like(color_mask)
-    min_area = 500
-
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < min_area:
-            continue
-
-        perimeter = cv2.arcLength(contour, True)
-        if perimeter == 0:
-            continue
-        circularity = 4 * np.pi * area / (perimeter * perimeter)
-
-        if circularity > 0.4:
-            cv2.drawContours(final_mask, [contour], -1, 255, -1)
-            # Add a bit of padding
-            cv2.drawContours(final_mask, [contour], -1, 255, 5)
-
-    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel)
-    final_mask = (final_mask > 0).astype(np.uint8) * 255
-
-    return final_mask
-
-
-def remove_background_batch(input_folder, output_folder):
-    """
-    Removes background for all images in `input_folder`, saving results to `output_folder`.
-    Uses YOLOv8 segmentation, and if that fails, uses the fallback color/curvature method.
-    """
-    os.makedirs(output_folder, exist_ok=True)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-
-    model = YOLO("yolov8n-seg.pt")
-    model.to(device)
-
-    image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
-    image_files = [f for f in Path(input_folder).glob('*') if f.suffix.lower() in image_extensions]
-
-    print(f"Found {len(image_files)} images to process for background removal")
-    for img_path in tqdm(image_files, desc="Removing background", unit="image", dynamic_ncols=True):
-        try:
-            image = cv2.imread(str(img_path))
-            if image is None:
-                print(f"Failed to read {img_path.name}")
-                continue
-
-            results = model(image, conf=0.3)
-            result = results[0]
-
-            # If YOLO fails => fallback
-            if not hasattr(result, 'masks') or result.masks is None or len(result.masks) == 0:
-                print(f"YOLO failed for {img_path.name}, using fallback method")
-                fallback_mask = color_curvature_segmentation(image)
-                mask_binary = fallback_mask // 255
-            else:
-                mask = result.masks[0].data.cpu().numpy().squeeze()
-                mask_binary = (mask > 0.5).astype(np.uint8)
-                if mask_binary.shape != image.shape[:2]:
-                    mask_binary = cv2.resize(mask_binary, (image.shape[1], image.shape[0]))
-
-            background_removed = image.copy()
-            background_removed[mask_binary == 0] = 0
-
-            output_path = os.path.join(output_folder, img_path.name)
-            cv2.imwrite(output_path, background_removed)
-
-        except Exception as e:
-            print(f"Error processing {img_path.name}: {str(e)}")
-
-    print("\nBackground removal completed!")
 
 
 def check_if_green_apple(hsv, apple_mask):
@@ -330,6 +224,9 @@ def detect_brown_spots(image):
     Simplified and more sensitive brown spot detection
     """
     try:
+        marked_image = image.copy()
+        
+        # Add these color space conversions at the start
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         
@@ -372,7 +269,7 @@ def detect_brown_spots(image):
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contour)
                 # Skip very top portion (stem area)
-                if y < image.shape[0] * 0.1:  # Reduced from 0.2
+                if y < image.shape[0] * 0.1:
                     continue
 
                 roi = image[y:y+h, x:x+w]
@@ -396,32 +293,8 @@ def detect_brown_spots(image):
                     spot_count += 1
                     spot_areas.append(area)
                     
-                    # Draw filled contour with transparency
-                    overlay = marked_image.copy()
-                    cv2.drawContours(overlay, [contour], -1, (0, 0, 255), -1)
-                    cv2.addWeighted(overlay, 0.4, marked_image, 0.6, 0, marked_image)
-                    
-                    # Draw contour border
+                    # Only draw the contour border, no fill or size annotation
                     cv2.drawContours(marked_image, [contour], -1, (0, 0, 255), 2)
-                    
-                    # Add spot number and size
-                    cv2.putText(marked_image,
-                              f"#{spot_count} ({area:.0f}px)",
-                              (x, y-5),
-                              cv2.FONT_HERSHEY_SIMPLEX,
-                              0.5,
-                              (0, 0, 255),
-                              2)
-
-        if has_brown_spots:
-            total_area = sum(spot_areas)
-            cv2.putText(marked_image,
-                        f"Brown spots: {spot_count}, Total area: {total_area:.0f}px",
-                        (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        (0, 0, 255),
-                        2)
 
         return has_brown_spots, marked_image
 
@@ -744,17 +617,10 @@ def detect_spots_fourier(image):
                                     (0, 0, 255),
                                     1)
 
+        # Don't draw any markings for periodic patterns
         has_periodic_defects = len(valid_regions) >= 2
-        if has_periodic_defects:
-            cv2.putText(marked_image,
-                        f"Periodic patterns: {len(valid_regions)}",
-                        (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        (0, 0, 255),
-                        2)
-
-        return has_periodic_defects, marked_image, enhanced
+        
+        return has_periodic_defects, image, enhanced
 
     except Exception as e:
         print(f"Error in detect_spots_fourier: {str(e)}")
