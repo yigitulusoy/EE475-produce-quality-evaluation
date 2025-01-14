@@ -318,15 +318,15 @@ def organize_by_prediction(image_folder, predictions, pepper_filenames):
         except Exception as e:
             print(f"Error copying {filename}: {str(e)}")
 
-# Example usage
+
 input_folder = r"C:\sonaama\peppers"
 output_folder = r"C:\sonaama\peppers_no_bg"
 debug_folder = r"C:\sonaama\background_removed_peppers"
 
-# First remove backgrounds and create debug images
+
 remove_background_batch(input_folder, output_folder, debug_folder)
 
-# Then process the dataset
+
 image_folder = output_folder
 txt_path = r"C:\sonaama\biber_puanlama.txt"
 
@@ -334,7 +334,6 @@ error_rate, predictions = process_dataset_with_txt(image_folder, txt_path)
 print(f"\nError rate: {error_rate * 100:.2f}%")
 print("Predictions:", predictions)
 
-# Get filenames from ground truth file again
 pepper_filenames, _ = load_ground_truth_from_txt(txt_path)
 
 # Organize images into class folders
